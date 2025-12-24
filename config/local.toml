@@ -1,5 +1,0 @@
-
-scan_directory = "/Users/ashu/Library/Containers/jp.buffalo.NasNavigator2.AS/Data/Documents/share"
-engine = "tantivy"
-tantivy_index_path = "/Users/ashu/.gemini/tmp/b132d54b4799fade729b2f12e315959988ed85d016ea116426d20d4c7dceae9a/tantivy_index"
-thumbnail_directory = "/Users/ashu/.gemini/tmp/b132d54b4799fade729b2f12e315959988ed85d016ea116426d20d4c7dceae9a/thumbnails"

@@ -1,5 +1,5 @@
 # Default configuration
-scan_directory = "/Users/ashu/Library/Containers/jp.buffalo.NasNavigator2.AS/Data/Documents/share"
+scan_directory = "/Users/ram/Library/Containers/jp.buffalo.NasNavigator2.AS/Data/Documents/pics"
 engine = "tantivy"
 elasticsearch_url = "http://localhost:9200"
 tantivy_index_path = "/tmp/image_indexer_tantivy"
