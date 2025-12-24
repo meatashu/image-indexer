@@ -46,6 +46,9 @@ pub enum AppError {
 
     #[error("Generic error: {0}")]
     Generic(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
 }
 
 impl ResponseError for AppError {
@@ -71,6 +74,7 @@ impl ResponseError for AppError {
             AppError::SendError => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::RecvError => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::Generic(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::NotFound(_) => StatusCode::NOT_FOUND,
         }
     }
 }

@@ -70,3 +70,4 @@ elasticsearch_url = "http://localhost:9200"
     ```
 
 The application will start scanning the directory specified in your configuration, and you will see log output in your terminal as it discovers, processes, and indexes your images.
+

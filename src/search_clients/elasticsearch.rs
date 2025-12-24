@@ -5,9 +5,7 @@ use crate::search::Searcher;
 use async_trait::async_trait;
 use elasticsearch::{
     http::transport::{BuildError, SingleNodeConnectionPool, TransportBuilder},
-    SearchParts,
-    UpdateParts,
-    Elasticsearch, IndexParts,
+    CountParts, DeleteParts, Elasticsearch, IndexParts, SearchParts, UpdateParts,
 };
 use serde_json::json;
 use url::Url;
@@ -169,5 +167,38 @@ impl Searcher for ElasticsearchSearcher {
         }
         log::debug!("Found {} images in Elasticsearch for query: {}", images.len(), query);
         Ok(images)
+    }
+
+    async fn count_images(&self) -> Result<u64, AppError> {
+        let response = self
+            .client
+            .count(CountParts::Index(&[INDEX_NAME]))
+            .send()
+            .await?;
+        
+        let body = response.json::<serde_json::Value>().await?;
+        let count = body["count"].as_u64().unwrap_or(0);
+        Ok(count)
+    }
+
+    async fn delete_document(&self, hash: &str) -> Result<(), AppError> {
+        self.client
+            .delete(DeleteParts::IndexId(INDEX_NAME, hash))
+            .send()
+            .await?
+            .error_for_status_code()?;
+        log::debug!("Deleted document with hash: {}", hash);
+        Ok(())
+    }
+
+    async fn update_document(&self, metadata: ImageMetadata) -> Result<(), AppError> {
+        self.client
+            .index(IndexParts::IndexId(INDEX_NAME, &metadata.file_hash))
+            .body(metadata.clone())
+            .send()
+            .await?
+            .error_for_status_code()?;
+        log::debug!("Updated document with hash: {}", metadata.file_hash);
+        Ok(())
     }
 }

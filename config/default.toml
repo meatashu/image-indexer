@@ -7,4 +7,4 @@ thumbnail_directory = "/tmp/thumbnails"
 allowed_extensions = ["jpg", "jpeg", "png", "gif", "heic", "raw"]
 num_workers = 4
 web_port = 8080
-log_level = "info"
+log_level = "warn"

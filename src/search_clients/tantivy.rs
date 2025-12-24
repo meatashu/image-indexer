@@ -198,4 +198,40 @@ impl Searcher for TantivySearcher {
             Ok(images)
         }).await?
     }
+
+    async fn count_images(&self) -> Result<u64, AppError> {
+        let index = self.index.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let reader = index.reader()?;
+            let searcher = reader.searcher();
+            Ok(searcher.num_docs())
+        })
+        .await?;
+        result
+    }
+
+    async fn delete_document(&self, hash: &str) -> Result<(), AppError> {
+        let index = self.index.clone();
+        let schema = self.schema.clone();
+        let hash_for_closure = hash.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let mut index_writer: IndexWriter = index.writer(50_000_000)?;
+            let file_hash_field = schema.get_field("file_hash").unwrap();
+            let term = Term::from_field_text(file_hash_field, &hash_for_closure);
+            index_writer.delete_term(term);
+            index_writer.commit()?;
+            log::debug!("Deleted document with hash: {}", hash_for_closure);
+            Ok::<(), tantivy::error::TantivyError>(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn update_document(&self, metadata: ImageMetadata) -> Result<(), AppError> {
+        // This is not the most efficient way, but it is simple and reuses existing code.
+        // A better implementation would combine delete and add into a single commit.
+        self.delete_document(&metadata.file_hash).await?;
+        self.index_metadata(metadata).await
+    }
 }

@@ -1,11 +1,84 @@
 use actix_files::NamedFile;
 use actix_web::{web, App, HttpServer, Responder, HttpResponse};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{PathBuf, Path};
 use std::sync::Arc;
+use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::search::Searcher;
-use crate::config::AppConfig;
+
+async fn read_file_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+    tokio::fs::read(path).await
+}
+
+#[derive(Deserialize)]
+pub struct DeleteDuplicatesRequest {
+    mode: String, // "all" or "keep-one"
+}
+
+#[derive(Serialize)]
+struct IndexingStatus {
+    total_images: u64,
+}
+
+async fn get_status(
+    searcher_data: web::Data<Arc<dyn Searcher>>,
+) -> Result<HttpResponse, AppError> {
+    log::debug!("Received request for indexing status.");
+    let count = searcher_data.count_images().await?;
+    let status = IndexingStatus {
+        total_images: count,
+    };
+    Ok(HttpResponse::Ok().json(status))
+}
+
+async fn delete_duplicates(
+    path: web::Path<String>,
+    searcher_data: web::Data<Arc<dyn Searcher>>,
+    payload: web::Json<DeleteDuplicatesRequest>,
+) -> Result<HttpResponse, AppError> {
+    let hash = path.into_inner();
+    log::info!("Received request to delete duplicates for hash: {} with mode: {}", &hash, &payload.mode);
+
+    // 1. Find the document
+    let results = searcher_data.search_images(format!("\"{}\"", &hash)).await?;
+    let mut metadata = if let Some(meta) = results.into_iter().next() {
+        meta
+    } else {
+        return Err(AppError::NotFound(format!("Image with hash {} not found", &hash)));
+    };
+
+    // 2. Determine which files to delete
+    let mut files_to_delete: Vec<String> = Vec::new();
+    if payload.mode == "all" {
+        files_to_delete.push(metadata.file_path.clone());
+        files_to_delete.extend(metadata.duplicate_paths.clone());
+    } else if payload.mode == "keep-one" {
+        files_to_delete.extend(metadata.duplicate_paths.clone());
+    } else {
+        return Ok(HttpResponse::BadRequest().body("Invalid mode. Use 'all' or 'keep-one'."));
+    }
+
+    // 3. Delete the files
+    for file_path in &files_to_delete {
+        match std::fs::remove_file(file_path) {
+            Ok(_) => log::debug!("Deleted file: {}", file_path),
+            Err(e) => log::error!("Failed to delete file {}: {}", file_path, e), // Log error but continue
+        }
+    }
+
+    // 4. Update the index
+    if payload.mode == "all" {
+        searcher_data.delete_document(&hash).await?;
+        log::info!("Deleted document from index for hash: {}", &hash);
+    } else if payload.mode == "keep-one" {
+        metadata.duplicate_paths.clear();
+        searcher_data.update_document(metadata).await?;
+        log::info!("Updated document in index for hash: {}", &hash);
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "status": "success", "deleted_files": files_to_delete })))
+}
 
 #[derive(Serialize, Debug)]
 struct WebImage {
@@ -72,6 +145,38 @@ async fn get_thumbnail(
     Ok(NamedFile::open_async(&thumbnail_path).await?)
 }
 
+async fn get_full_image(
+    path: web::Path<String>,
+    searcher_data: web::Data<Arc<dyn Searcher>>,
+) -> Result<HttpResponse, AppError> {
+    let hash = path.into_inner();
+    log::debug!("Received request for full image with hash: {}", hash);
+
+    let results = searcher_data.search_images(format!("\"{}\"", hash)).await?;
+
+    if let Some(metadata) = results.into_iter().next() {
+        let file_path = PathBuf::from(metadata.file_path);
+        log::trace!("Attempting to read full image from: {:?}", file_path);
+
+        match read_file_bytes(&file_path).await {
+            Ok(bytes) => {
+                let mime_type = mime_guess::from_path(&file_path).first_or(mime::APPLICATION_OCTET_STREAM);
+                
+                Ok(HttpResponse::Ok()
+                    .content_type(mime_type.as_ref())
+                    .body(bytes))
+            }
+            Err(e) => {
+                log::error!("Failed to read file for full image at {:?}: {}", file_path, e);
+                Err(AppError::Io(e))
+            }
+        }
+    } else {
+        Err(AppError::NotFound(format!("Image with hash {} not found", hash)))
+    }
+}
+
+
 pub async fn start_web_server(
     config: Arc<AppConfig>,
     searcher: Arc<dyn Searcher>,
@@ -89,7 +194,13 @@ pub async fn start_web_server(
             .app_data(searcher_data.clone())
             .service(actix_files::Files::new("/static", "./static").show_files_listing())
             .service(web::resource("/api/images").to(get_images))
+            .service(web::resource("/api/status").to(get_status))
             .service(web::resource("/api/thumbnails/{hash}").to(get_thumbnail))
+            .service(web::resource("/api/images/{hash}").to(get_full_image))
+            .service(
+                web::resource("/api/images/{hash}/duplicates")
+                    .route(web::delete().to(delete_duplicates)),
+            )
             .default_service(web::to(index)) // Serve index.html for any unmatched route
     })
     .bind(format!("0.0.0.0:{}", port))?

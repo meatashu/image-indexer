@@ -8,16 +8,57 @@
 </head>
 <body>
     <div class="container">
-        <h1>Image Indexer</h1>
+        <div class="header">
+            <h1>Image Indexer</h1>
+            <div id="settingsIcon" class="settings-icon">
+                &#9881; <!-- Gear icon -->
+            </div>
+        </div>
         <div class="search-bar">
             <input type="text" id="searchInput" placeholder="Search images...">
             <button id="searchButton">Search</button>
         </div>
+        <div><button id="duplicates">Duplicates</button><button id="allImages">All Images</button><button id="places">Places</button><button id="people">People</button><button id="tags">Tags</button></div>
         <div class="image-grid" id="imageGrid">
             <!-- Images will be loaded here by JavaScript -->
             <p>Loading images...</p>
         </div>
     </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content settings-modal-content">
+            <span class="close-settings close">&times;</span>
+            <h2>Settings</h2>
+            <div id="settingsContent">
+                <div class="setting-item">
+                    <h3>Indexing Status</h3>
+                    <p>Total Images Indexed: <span id="totalImages">Loading...</span></p>
+                    <p>Status: <span id="indexingStatus">Idle</span></p>
+                    <button id="startIndexing" disabled>Start Indexing</button>
+                    <button id="stopIndexing" disabled>Stop Indexing</button>
+                </div>
+                <div class="setting-item">
+                    <h3>Configuration</h3>
+                    <label for="scanPath">Image Directory Path:</label>
+                    <input type="text" id="scanPath" name="scanPath" style="width: 80%;" value="/default/image/path">
+                    <button id="saveScanPath">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The Modal/Lightbox -->
+    <div id="imageModal" class="modal">
+        <span class="close">&times;</span>
+        <span class="nav prev">&#10094;</span>
+        <span class="nav next">&#10095;</span>
+        <div class="modal-content">
+            <img id="modalImage">
+            <div id="modal-caption"></div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>
