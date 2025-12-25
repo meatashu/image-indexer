@@ -234,4 +234,36 @@ impl Searcher for TantivySearcher {
         self.delete_document(&metadata.file_hash).await?;
         self.index_metadata(metadata).await
     }
+
+    async fn get_all_hashes(&self) -> Result<std::collections::HashSet<String>, AppError> {
+        let index = self.index.clone();
+        let schema = self.schema.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let reader = index.reader()?;
+            let searcher = reader.searcher();
+            let file_hash_field = schema.get_field("file_hash").unwrap();
+
+            let mut hashes = std::collections::HashSet::new();
+
+            // Create a query that matches all documents.
+            let query = tantivy::query::AllQuery;
+
+            // Create a collector that collects all documents.
+            // We can use TopDocs with a limit of all docs.
+            let top_docs = searcher.search(&query, &tantivy::collector::TopDocs::with_limit(searcher.num_docs() as usize))?;
+
+            for (_score, doc_address) in top_docs {
+                let retrieved_doc = searcher.doc(doc_address)?;
+                if let Some(hash_val) = retrieved_doc.get_first(file_hash_field) {
+                    if let Some(hash) = hash_val.as_text() {
+                        hashes.insert(hash.to_string());
+                    }
+                }
+            }
+
+            Ok(hashes)
+        })
+        .await?
+    }
 }

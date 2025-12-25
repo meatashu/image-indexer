@@ -8,6 +8,7 @@ use elasticsearch::{
     CountParts, DeleteParts, Elasticsearch, IndexParts, SearchParts, UpdateParts,
 };
 use serde_json::json;
+use std::collections::HashSet;
 use url::Url;
 
 const INDEX_NAME: &str = "images";
@@ -200,5 +201,63 @@ impl Searcher for ElasticsearchSearcher {
             .error_for_status_code()?;
         log::debug!("Updated document with hash: {}", metadata.file_hash);
         Ok(())
+    }
+
+    async fn get_all_hashes(&self) -> Result<HashSet<String>, AppError> {
+        let mut hashes = HashSet::new();
+        let mut scroll_id: Option<String> = None;
+
+        loop {
+            let response = if let Some(sid) = &scroll_id {
+                self.client
+                    .scroll(elasticsearch::ScrollParts::ScrollId(sid))
+                    .send()
+                    .await?
+            } else {
+                self.client
+                    .search(SearchParts::Index(&[INDEX_NAME]))
+                    .scroll("1m")
+                    .body(json!({
+                        "_source": ["file_hash"],
+                        "query": {
+                            "match_all": {}
+                        },
+                        "size": 1000
+                    }))
+                    .send()
+                    .await?
+            };
+
+            let body = response.json::<serde_json::Value>().await?;
+            let hits = body["hits"]["hits"].as_array().unwrap();
+
+            if hits.is_empty() {
+                break;
+            }
+
+            for hit in hits {
+                if let Some(source) = hit["_source"].as_object() {
+                    if let Some(hash_val) = source.get("file_hash") {
+                        if let Some(hash) = hash_val.as_str() {
+                            hashes.insert(hash.to_string());
+                        }
+                    }
+                }
+            }
+
+            scroll_id = body["_scroll_id"].as_str().map(|s| s.to_string());
+            if scroll_id.is_none() {
+                break;
+            }
+        }
+
+        if let Some(sid) = scroll_id.as_deref() {
+            self.client
+                .clear_scroll(elasticsearch::ClearScrollParts::ScrollId(&[sid]))
+                .send()
+                .await?;
+        }
+
+        Ok(hashes)
     }
 }

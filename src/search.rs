@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::metadata::ImageMetadata;
 use async_trait::async_trait;
+use std::collections::HashSet;
 
 #[async_trait]
 pub trait Searcher: Send + Sync {
@@ -10,4 +11,5 @@ pub trait Searcher: Send + Sync {
     async fn count_images(&self) -> Result<u64, AppError>;
     async fn delete_document(&self, hash: &str) -> Result<(), AppError>;
     async fn update_document(&self, metadata: ImageMetadata) -> Result<(), AppError>;
+    async fn get_all_hashes(&self) -> Result<HashSet<String>, AppError>;
 }

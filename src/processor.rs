@@ -4,6 +4,7 @@ use crate::metadata::ImageMetadata;
 use exif::Reader;
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
@@ -12,22 +13,28 @@ pub fn start_processing(
     config: AppConfig,
     paths_rx: crossbeam_channel::Receiver<PathBuf>,
     metadata_tx: crossbeam_channel::Sender<ImageMetadata>,
+    existing_hashes: HashSet<String>,
 ) -> Result<(), AppError> {
     log::info!("Starting image processing with {} workers", config.num_workers);
     log::debug!("Processor will use thumbnail directory: {}", config.thumbnail_directory);
+    log::info!("Received {} existing hashes to check against.", existing_hashes.len());
 
     let paths: Vec<PathBuf> = paths_rx.iter().collect();
     log::info!("Received {} paths for processing.", paths.len());
 
     paths.into_par_iter().try_for_each(|path| {
         log::info!("Processing image started for: {:?}", path); // Log when processing starts for a specific image
-        match process_image(&config, &path) {
-            Ok(metadata) => {
+        match process_image(&config, &path, &existing_hashes) {
+            Ok(Some(metadata)) => {
                 log::trace!("Extracted metadata for {:?}: {:?}", path, metadata);
                 metadata_tx.send(metadata)?;
                 log::info!("Processing image finished for: {:?}", path); // Log when processing finishes
                 Ok::<(), AppError>(())
             },
+            Ok(None) => {
+                log::info!("Skipping already indexed image: {:?}", path);
+                Ok::<(), AppError>(())
+            }
             Err(e) => {
                 log::warn!("Failed to process image {:?}: {}", path, e);
                 // Continue processing other images, don't propagate the error
@@ -40,7 +47,7 @@ pub fn start_processing(
     Ok(())
 }
 
-fn process_image(config: &AppConfig, path: &PathBuf) -> Result<ImageMetadata, AppError> {
+fn process_image(config: &AppConfig, path: &PathBuf, existing_hashes: &HashSet<String>) -> Result<Option<ImageMetadata>, AppError> {
     log::trace!("Calculating hash for image: {:?}", path);
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -54,6 +61,10 @@ fn process_image(config: &AppConfig, path: &PathBuf) -> Result<ImageMetadata, Ap
     }
     let hash = format!("{:x}", hasher.finalize());
     log::debug!("Calculated hash for {:?}: {}", path, hash);
+
+    if existing_hashes.contains(&hash) {
+        return Ok(None);
+    }
 
     log::trace!("Extracting EXIF data for image: {:?}", path);
     let file_for_exif = File::open(path)?; // Reopen file for EXIF
@@ -137,5 +148,5 @@ fn process_image(config: &AppConfig, path: &PathBuf) -> Result<ImageMetadata, Ap
     metadata.thumbnail_path = thumbnail_path.to_string_lossy().to_string();
     log::debug!("Thumbnail saved to: {:?}", thumbnail_path);
 
-    Ok(metadata)
+    Ok(Some(metadata))
 }

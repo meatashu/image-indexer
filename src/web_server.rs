@@ -1,5 +1,5 @@
 use actix_files::NamedFile;
-use actix_web::{web, App, HttpServer, Responder, HttpResponse};
+use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use std::path::{PathBuf, Path};
 use std::sync::Arc;
@@ -16,10 +16,35 @@ pub struct DeleteDuplicatesRequest {
     mode: String, // "all" or "keep-one"
 }
 
+#[derive(Deserialize)]
+pub struct StartIndexingRequest {
+    scan_directory: String,
+    num_workers: Option<usize>,
+}
+
 #[derive(Serialize)]
 struct IndexingStatus {
     total_images: u64,
 }
+
+async fn start_indexing_handler(
+    payload: web::Json<StartIndexingRequest>,
+    app_config: web::Data<Arc<AppConfig>>,
+    searcher_data: web::Data<Arc<dyn Searcher>>,
+) -> Result<HttpResponse, AppError> {
+    log::info!("Received request to start indexing for path: {}", &payload.scan_directory);
+
+
+
+    // Correctly create a local AppConfig from the Arc
+    let mut config_for_job: AppConfig = app_config.as_ref().as_ref().clone();
+    config_for_job.scan_directory = payload.scan_directory.clone();
+    config_for_job.num_workers = payload.num_workers.unwrap_or(app_config.num_workers);
+    crate::start_indexing_job(config_for_job, searcher_data.get_ref().clone());
+
+    Ok(HttpResponse::Accepted().json(serde_json::json!({ "status": "indexing_started" })))
+}
+
 
 async fn get_status(
     searcher_data: web::Data<Arc<dyn Searcher>>,
@@ -133,7 +158,7 @@ async fn get_images(
 
 async fn get_thumbnail(
     path: web::Path<String>,
-    app_config: web::Data<AppConfig>,
+    app_config: web::Data<Arc<AppConfig>>,
 ) -> Result<NamedFile, AppError> {
     let hash = path.into_inner();
     log::debug!("Received request for thumbnail with hash: {}", hash);
@@ -200,6 +225,10 @@ pub async fn start_web_server(
             .service(
                 web::resource("/api/images/{hash}/duplicates")
                     .route(web::delete().to(delete_duplicates)),
+            )
+            .service(
+                web::resource("/api/indexer/start")
+                    .route(web::post().to(start_indexing_handler)),
             )
             .default_service(web::to(index)) // Serve index.html for any unmatched route
     })
